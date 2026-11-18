@@ -32,8 +32,12 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  */
 public class Hook implements IXposedHookLoadPackage {
     private static final String TAG = "CallRecAuto: ";
-    private static final int L = 20, T = 110, R = 1240, B = 2259;   // 画布尺寸，实际显示 = ×FREEFORM_SCALE
-    private static final float FREEFORM_SCALE = 0.47f;   // 目标小窗矩形
+    // 画布几何按屏幕比例算，默认值 = K90（1280×2772）上调好的那一套
+    private static final int DEFAULT_W = 1280, DEFAULT_H = 2772;
+    private static final float MARGIN_LR_RATIO = 0.0156f;  // 20/1280
+    private static final float TOP_RATIO = 0.0397f;        // 110/2772
+    private static final float CANVAS_H_RATIO = 0.775f;    // 2149/2772
+    private static final float FREEFORM_SCALE = 0.47f;     // 目标小窗 = 画布 ×0.47
     private static final int WINDOWING_FREEFORM = 5;
 
     private static final String PKG_INCALL = "com.android.incallui";
@@ -199,16 +203,18 @@ public class Hook implements IXposedHookLoadPackage {
 
             Bundle opts = null;
             try {
+                Rect canvas = canvasFor(ctx);
+                float scale = freeformScale(ctx);
                 Object ao = ActivityOptions.makeBasic();
-                ActivityOptions.class.getMethod("setLaunchBounds", Rect.class)
-                        .invoke(ao, new Rect(L, T, R, B));
+                ActivityOptions.class.getMethod("setLaunchBounds", Rect.class).invoke(ao, canvas);
                 ActivityOptions.class.getMethod("setLaunchWindowingMode", int.class)
                         .invoke(ao, WINDOWING_FREEFORM);
                 // MIUI: 小窗按比例的真正做法 —— 画布铺满 + freeformScale 缩放 + normalFreeForm=false（mini）
                 Object inj = ActivityOptions.class.getMethod("getActivityOptionsInjector").invoke(ao);
-                inj.getClass().getMethod("setFreeformScale", float.class).invoke(inj, FREEFORM_SCALE);
+                inj.getClass().getMethod("setFreeformScale", float.class).invoke(inj, scale);
                 inj.getClass().getMethod("setNormalFreeForm", boolean.class).invoke(inj, false);
                 opts = (Bundle) ActivityOptions.class.getMethod("toBundle").invoke(ao);
+                XposedBridge.log(TAG + "canvas=" + canvas + " scale=" + scale);
             } catch (Throwable t) {
                 XposedBridge.log(TAG + "activity options failed: " + t);
             }
@@ -217,6 +223,39 @@ public class Hook implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             XposedBridge.log(TAG + "launch failed: " + t);
         }
+    }
+
+    /**
+     * 画布按屏幕真实像素等比换算：不同分辨率下小窗占屏比例保持一致。
+     * 显示尺寸 = 画布 × scale，因此只要 scale 不变，外观就是同一套版式。
+     */
+    private static Rect canvasFor(Context ctx) {
+        int w = DEFAULT_W, h = DEFAULT_H;
+        try {
+            android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
+            if (dm.widthPixels > 0 && dm.heightPixels > 0) {
+                w = dm.widthPixels;
+                h = dm.heightPixels;
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "display metrics failed, use default: " + t);
+        }
+        int l = Math.round(w * MARGIN_LR_RATIO);
+        int top = Math.round(h * TOP_RATIO);
+        return new Rect(l, top, w - 2 * l, top + Math.round(h * CANVAS_H_RATIO));
+    }
+
+    private static float freeformScale(Context ctx) {
+        try {
+            String s = android.provider.Settings.Global.getString(
+                    ctx.getContentResolver(), "callrec_freeform_scale");
+            if (s != null && s.length() > 0) {
+                float f = Float.parseFloat(s.trim());
+                if (f > 0.05f && f < 1f) return f;
+            }
+        } catch (Throwable ignore) {
+        }
+        return FREEFORM_SCALE;
     }
 
     private static Context resolveContext() {

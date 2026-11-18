@@ -7,8 +7,16 @@ D=${1:?usage: ./deploy.sh <ip>:<port>}
 cd "$(dirname "$0")"
 ./build.sh
 
-adb -s "$D" install -r build/CallRecAuto.apk | tail -1
+adb -s "$D" install -r build/CallRecAuto.apk | tail -1 || true
 NEW=$(adb -s "$D" shell "pm path com.nil.callrec" | sed 's/package://' | tr -d '\r')
+if [ -z "$NEW" ]; then
+  # MIUI/HyperOS 常见：INSTALL_FAILED_USER_RESTRICTED（锁屏 / USB 安装开关没开）
+  echo "normal install failed, retry as root ..."
+  adb -s "$D" push build/CallRecAuto.apk /data/local/tmp/CallRecAuto.apk >/dev/null
+  adb -s "$D" shell "su -c 'pm install -r -d /data/local/tmp/CallRecAuto.apk'" | tail -1
+  NEW=$(adb -s "$D" shell "pm path com.nil.callrec" | sed 's/package://' | tr -d '\r')
+fi
+[ -n "$NEW" ] || { echo "install failed, abort"; exit 1; }
 echo "apk: $NEW"
 
 adb -s "$D" shell "su -c 'cp /data/adb/lspd/config/modules_config.db /sdcard/mc_tmp.db'" >/dev/null

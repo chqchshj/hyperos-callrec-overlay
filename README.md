@@ -136,6 +136,18 @@ OTA 后如果模块静默失效（LSPosed 里 enabled 但没有 hook 日志）�
 4. 录音机：`SoundRecorder#onCreate/onNewIntent`、`显示文本`/`隐藏文本框` 的 contentDescription、
    `com.xiaomi.xms.ai.recorder.AIRecorderManager#isRecording()`
 
+## 另一台机型实测（Redmi Note 12 Turbo / marble）
+
+- 机型 `23049RAD8C`，HyperOS 4 `OS4.0.5.0.XPCCNXM`，Android 17，1080×2400，录音机 8.1.6
+- 模块加载正常：作用域三个包都能 hook（`audiomonitor hook installed (createUIManger)` / `SoundRecorder hook installed`）
+- 窗口几何是**按屏幕比例算**的，同一份 APK 不用改数值：
+  `canvas = (0.0156W, 0.0397H) → (W-0.0312W, 0.0397H + 0.775H)`，`scale=0.47`
+  → K90（1280×2772）得到 `(20,110,1240,2259)` 显示约 583×1010；
+  N12T（1080×2400）得到 `(17,95,1046,1955)` 显示约 484×874，占屏比例一致
+- 想整体放大/缩小：`settings put global callrec_freeform_scale 0.52`（0.05–1，默认 0.47）
+- 坑：这台 ROM 的 LSPosed **不往 logcat 写日志**，hook 是否加载要看
+  `su -c 'cat /data/adb/lspd/log/modules_*.log'`
+
 ## 已知限制
 
 - 与 MIUI 内部实现强耦合，**系统升级后可能失效**，需要重新对位
