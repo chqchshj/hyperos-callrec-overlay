@@ -59,8 +59,6 @@ public class Hook implements IXposedHookLoadPackage {
     private static long sLastLaunchMs = 0L;      // 普通电话去抖
     private static long sLastVoipLaunchMs = 0L;  // 应用通话去抖
     private static ClassLoader sCl;
-    private static volatile int sResultCount = 0; // 本轮实时转写收到的结果条数
-    private static volatile long sClickAtMs = 0L;  // 本轮点「显示文本」的时刻
     private static int sSendCount = 0;           // 诊断：sendData 调用次数
     private static long sSendBytes = 0L;         // 诊断：累计字节
     private static int sSendPeak = 0;            // 诊断：最大绝对采样值
@@ -312,31 +310,7 @@ public class Hook implements IXposedHookLoadPackage {
             XposedBridge.log(TAG + "hook onNewIntent failed: " + t);
         }
         hookAsrFeedDiag(lp);
-        hookRecognizeResult(lp);
         XposedBridge.log(TAG + "SoundRecorder hook installed");
-    }
-
-    /** 记录实时转写是否有结果，用来判断「面板开了但一直不出字」并触发重试。 */
-    private void hookRecognizeResult(XC_LoadPackage.LoadPackageParam lp) {
-        try {
-            ClassLoader cl = lp.classLoader;
-            Class<?> rr = XposedHelpers.findClass("com.xiaomi.ai.capability.model.RecognizeResult", cl);
-            XposedHelpers.findAndHookMethod(
-                    "com.android.soundrecorder.ai.airecorder.ai.RealTimeRecognizeManager$SpeechRecognizeCallbackInner",
-                    cl, "onRecognizeResult", String.class, rr, new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            int n = ++sResultCount;
-                            if (n == 1) {
-                                XposedBridge.log(TAG + "first recognize result after "
-                                        + (System.currentTimeMillis() - sClickAtMs) + "ms");
-                            }
-                        }
-                    });
-            XposedBridge.log(TAG + "recognize result hook installed");
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "recognize result hook skipped: " + t);
-        }
     }
 
     /**
@@ -432,16 +406,11 @@ public class Hook implements IXposedHookLoadPackage {
                     View btn = findByDesc(root, "显示文本");
                     if (btn != null && btn.isShown()) {
                         btn.performClick();
-                        sClickAtMs = System.currentTimeMillis();
                         XposedBridge.log(TAG + "clicked 显示文本 (try " + tries[0]
                                 + ", +" + (android.os.SystemClock.elapsedRealtime() - t0) + "ms)");
-                        watchFirstResult(act, voip ? 1 : 0);
                         return;
                     }
-                    if (findByDesc(root, "隐藏文本框") != null) {   // 已经是文字模式
-                        watchFirstResult(act, voip ? 1 : 0);
-                        return;
-                    }
+                    if (findByDesc(root, "隐藏文本框") != null) return;   // 已经是文字模式
                 } catch (Throwable t) {
                     XposedBridge.log(TAG + "showText error: " + t);
                 }
@@ -457,56 +426,6 @@ public class Hook implements IXposedHookLoadPackage {
         }
         XposedBridge.log(TAG + "click scheduled in " + delayMs + "ms (from=" + fromPkg + ")");
         h.postDelayed(r, delayMs);
-    }
-
-    /**
-     * 点了「显示文本」之后盯 9 秒：一条结果都没有就重开一次识别（最多 2 次）。
-     * MIUI 的实时转写偶发「会话建了、音频也在送、但整通不回结果」（多出现在被叫侧），
-     * 重开一次往往就好了。
-     */
-    private void watchFirstResult(final Activity act, final int attempt) {
-        if (attempt > 2) return;
-        final Handler h = new Handler(Looper.getMainLooper());
-        h.postDelayed(new Runnable() {
-            @Override public void run() {
-                try {
-                    if (sResultCount > 0) {
-                        XposedBridge.log(TAG + "realtime asr ok, results=" + sResultCount);
-                        return;
-                    }
-                    if (act.isFinishing() || !isRecording()) return;
-                    View root = act.getWindow().getDecorView();
-                    View btn = findByDesc(root, "显示文本");
-                    View hide = findByDesc(root, "隐藏文本框");
-                    if (hide != null && hide.isShown()) {
-                        // 先把 AI 模式关掉，1.2s 后再打开 —— 等于强制重建识别会话
-                        hide.performClick();
-                        h.postDelayed(new Runnable() {
-                            @Override public void run() {
-                                try {
-                                    View r2 = act.getWindow().getDecorView();
-                                    View b2 = findByDesc(r2, "显示文本");
-                                    if (b2 != null && b2.isShown()) {
-                                        b2.performClick();
-                                        sClickAtMs = System.currentTimeMillis();
-                                        XposedBridge.log(TAG + "re-opened 显示文本 (retry " + attempt + ")");
-                                        watchFirstResult(act, attempt + 1);
-                                    }
-                                } catch (Throwable ignore) {
-                                }
-                            }
-                        }, 1200L);
-                    } else if (btn != null && btn.isShown()) {
-                        btn.performClick();
-                        sClickAtMs = System.currentTimeMillis();
-                        XposedBridge.log(TAG + "clicked 显示文本 (retry " + attempt + ")");
-                        watchFirstResult(act, attempt + 1);
-                    }
-                } catch (Throwable t) {
-                    XposedBridge.log(TAG + "watchFirstResult error: " + t);
-                }
-            }
-        }, 9000L);
     }
 
     /** 录音机进程内判断“现在是否正在录音”，不需要任何权限。 */
