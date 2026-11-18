@@ -59,6 +59,9 @@ public class Hook implements IXposedHookLoadPackage {
     private static long sLastLaunchMs = 0L;      // 普通电话去抖
     private static long sLastVoipLaunchMs = 0L;  // 应用通话去抖
     private static ClassLoader sCl;
+    private static int sSendCount = 0;           // 诊断：sendData 调用次数
+    private static long sSendBytes = 0L;         // 诊断：累计字节
+    private static int sSendPeak = 0;            // 诊断：最大绝对采样值
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
@@ -306,7 +309,72 @@ public class Hook implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             XposedBridge.log(TAG + "hook onNewIntent failed: " + t);
         }
+        hookAsrFeedDiag(lp);
         XposedBridge.log(TAG + "SoundRecorder hook installed");
+    }
+
+    /**
+     * 诊断：实时转写到底有没有拿到音频。
+     * 打开开关 settings put global callrec_diag 1 后，每秒汇总一条：
+     * 送 ASR 的帧数 / 字节数 / 峰值采样。峰值≈0 就是喂进去的是静音。
+     */
+    private void hookAsrFeedDiag(XC_LoadPackage.LoadPackageParam lp) {
+        try {
+            final ClassLoader cl = lp.classLoader;
+            Class<?> cfg = XposedHelpers.findClass(
+                    "com.android.soundrecorder.ai.base.config.RecordConfig", cl);
+            XposedHelpers.findAndHookMethod(
+                    "com.android.soundrecorder.ai.airecorder.ai.RealTimeRecognizeManager",
+                    cl, "sendData", Object.class, cfg, new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            try {
+                                Context ctx = resolveAppContext();
+                                if (ctx == null) return;
+                                int on = android.provider.Settings.Global.getInt(
+                                        ctx.getContentResolver(), "callrec_diag", 0);
+                                if (on != 1) return;
+                                byte[] raw = null;
+                                try {
+                                    Class<?> u = XposedHelpers.findClass(
+                                            "com.android.soundrecorder.ai.airecorder.util.AudioDataUtils", cl);
+                                    raw = (byte[]) XposedHelpers.callStaticMethod(u,
+                                            "extractRawBytes", param.args[0]);
+                                } catch (Throwable ignore) {
+                                }
+                                sSendCount++;
+                                if (raw == null) return;
+                                sSendBytes += raw.length;
+                                for (int i = 0; i + 1 < raw.length; i += 2) {
+                                    int v = (short) ((raw[i] & 0xff) | (raw[i + 1] << 8));
+                                    int a = v < 0 ? -v : v;
+                                    if (a > sSendPeak) sSendPeak = a;
+                                }
+                                if (sSendCount % 50 == 0) {
+                                    XposedBridge.log(TAG + "[diag] sendData frames=" + sSendCount
+                                            + " bytes=" + sSendBytes
+                                            + " peak=" + sSendPeak);
+                                    sSendPeak = 0;
+                                }
+                            } catch (Throwable t) {
+                                XposedBridge.log(TAG + "[diag] sendData hook error: " + t);
+                            }
+                        }
+                    });
+            XposedBridge.log(TAG + "ASR feed diag hook installed");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "ASR feed diag hook skipped: " + t);
+        }
+    }
+
+    private static Context resolveAppContext() {
+        try {
+            Class<?> at = Class.forName("android.app.ActivityThread");
+            Object o = at.getMethod("currentApplication").invoke(null);
+            if (o instanceof Context) return (Context) o;
+        } catch (Throwable ignore) {
+        }
+        return null;
     }
 
     /** 从启停 Intent 的嵌套 Bundle 里取发起方包名；onCreate 的 Bundle 不是 Intent。 */
