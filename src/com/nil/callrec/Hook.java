@@ -449,7 +449,7 @@ public class Hook implements IXposedHookLoadPackage {
             }
         };
         // 应用通话的 ASR 起得比电话慢，默认晚一点
-        int delayMs = voip ? 1800 : 1500;
+        int delayMs = voip ? 1200 : 1500;
         try {
             delayMs = android.provider.Settings.Global.getInt(act.getContentResolver(),
                     voip ? "callrec_voip_click_delay_ms" : "callrec_click_delay_ms", delayMs);

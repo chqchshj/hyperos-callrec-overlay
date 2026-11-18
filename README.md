@@ -57,7 +57,7 @@ MIUI 的小窗是「按整屏密度渲染 → 整体按比例缩小」。给一�
 
 录音页默认只有计时器；左下角 `contentDescription == "显示文本"`（真实 id `btn_ai_mode_toggle`）
 既进 AI 模式又开始识别，`performClick()` 即可。**时机**很关键：点太早（<600 ms）ASR 音频管线还没就绪，
-`onRecognizeStart` 之后永远没有结果。默认延迟 1000 ms（电话）/ 1800 ms（三方通话），可运行时调。
+`onRecognizeStart` 之后永远没有结果。默认延迟 1000 ms（电话）/ 1200 ms（三方通话），可运行时调。
 
 ## 前置：这些 MIUI 开关必须开
 
@@ -118,11 +118,15 @@ su -c 'logcat -d | grep CallRecAuto'
 
 ```bash
 adb shell su -c 'settings put global callrec_click_delay_ms 1200'        # 电话：转写按钮延迟
-adb shell su -c 'settings put global callrec_voip_click_delay_ms 1800'   # 三方通话
+adb shell su -c 'settings put global callrec_voip_click_delay_ms 1200'   # 三方通话（实测 1800 没必要）
 ```
 
 判据：`onRecognizeStart` 之后长时间没有 `onRecognizeResultUpdate` ⇒ 点太早，往上加 200–300 ms；
 总丢第一句同样往上加。
+
+实测时间线（微信通话，`callrec_voip_click_delay_ms=1800` 时）：点「显示文本」后 **10 ms** 云端会话就建好了
+（`开始云侧转录` → `onRecognizeStart`），ASR 自己还要 ~1.7 s 才吐第一句 —— 所以三方通话的额外余量
+从 1800 压到 **1200** 即可，首句提前约 0.6 s。
 
 想改窗口尺寸/位置，改 `src/com/nil/callrec/Hook.java` 顶部的 `L, T, R, B, FREEFORM_SCALE` 后重新 `./deploy.sh`。
 
