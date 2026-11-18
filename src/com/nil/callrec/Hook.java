@@ -285,8 +285,12 @@ public class Hook implements IXposedHookLoadPackage {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
                 if (param.thisObject instanceof Activity) {
-                    String fromPkg = fromPackageOf(param.args.length > 0 ? param.args[0] : null);
-                    scheduleShowText((Activity) param.thisObject, fromPkg);
+                    Activity act = (Activity) param.thisObject;
+                    // onCreate 的参数是 savedInstanceState（不是 Intent），要另外取 getIntent()
+                    Object arg = param.args.length > 0 ? param.args[0] : null;
+                    String fromPkg = fromPackageOf(arg);
+                    if (fromPkg == null) fromPkg = fromPackageOf(act.getIntent());
+                    scheduleShowText(act, fromPkg);
                 }
             }
         };
