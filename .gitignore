@@ -1,0 +1,9 @@
+out/
+stubs/out/
+dex/
+build/
+*.apk
+!debug.keystore
+*.iml
+.idea/
+.DS_Store

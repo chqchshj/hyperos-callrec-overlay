@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.nil.callrec"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="33" android:targetSdkVersion="36" />
+
+    <application
+        android:label="通话录音浮窗"
+        android:hasCode="true">
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription"
+            android:value="电话或微信/QQ等三方语音通话开始时，自动浮出录音机「录音中·实时转文字」小窗并展开转写面板" />
+        <meta-data android:name="xposedminversion" android:value="93" />
+        <meta-data android:name="xposedscope" android:value="com.android.incallui;com.android.soundrecorder;com.miui.audiomonitor" />
+    </application>
+</manifest>
